@@ -22,7 +22,7 @@ module ActiveStorage
     def upload(key, io, checksum: nil, content_type: nil, disposition: nil, filename: nil)
       instrument :upload, key: key, checksum: checksum do
         content_type ||= Marcel::MimeType.for(io)
-        bucket.put_object(path_for(key), content_type: content_type) do |stream|
+        bucket.put_object(path_for(key, content_type: content_type), content_type: content_type) do |stream|
           stream << io.read(CHUNK_SIZE) until io.eof?
         end
       end
@@ -87,7 +87,7 @@ module ActiveStorage
     # Allowed Headers: *
     def url_for_direct_upload(key, expires_in:, content_type:, content_length:, checksum:)
       instrument :url, key: key do |payload|
-        generated_url = bucket.object_url(path_for(key), false)
+        generated_url = bucket.object_url(path_for(key, content_type: content_type), false)
         payload[:url] = generated_url
         generated_url
       end
@@ -127,7 +127,7 @@ module ActiveStorage
     attr_reader :config
 
     def private_url(key, expires_in: 60, filename: nil, content_type: nil, disposition: nil, params: {}, **)
-      filekey = path_for(key)
+      filekey = path_for(key, content_type: content_type)
 
       params["response-content-type"] = content_type unless content_type.blank?
 
@@ -139,8 +139,8 @@ module ActiveStorage
       object_url(filekey, sign: true, expires_in: expires_in, params: params)
     end
 
-    def public_url(key, params: {}, **)
-      object_url(path_for(key), sign: false, params: params)
+    def public_url(key, content_type: nil, params: {}, **)
+      object_url(path_for(key, content_type: content_type), sign: false, params: params)
     end
 
     # Remove this in Rails 6.1, compatiable with Rails 6.0.0
@@ -148,12 +148,19 @@ module ActiveStorage
       @public == true
     end
 
-    def path_for(key)
+    def path_for(key, content_type: nil)
+      _content_type = content_type || blob_for(key)&.content_type
+      if _content_type.present?
+        filename = "#{key}.#{_content_type.split("/").last}"
+      else
+        filename = key
+      end
+
       root_path = config.fetch(:path, nil)
       full_path = if root_path.blank? || root_path == "/"
-                    key
+                    filename
                   else
-                    File.join(root_path, key)
+                    File.join(root_path, filename)
                   end
 
       full_path.gsub(%r{^/}, "").gsub(%r{/+}, "/")
@@ -191,7 +198,7 @@ module ActiveStorage
     end
 
     def authorization(key, content_type, checksum, date)
-      filename = File.expand_path("/#{bucket.name}/#{path_for(key)}")
+      filename = File.expand_path("/#{bucket.name}/#{path_for(key, content_type: content_type)}")
       addition_headers = "x-oss-date:#{date}"
       sign = ["PUT", checksum, content_type, date, addition_headers, filename].join("\n")
       signature = bucket.sign(sign)
