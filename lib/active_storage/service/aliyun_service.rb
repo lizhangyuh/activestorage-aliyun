@@ -149,7 +149,7 @@ module ActiveStorage
     end
 
     def path_for(key, content_type: nil)
-      _content_type = content_type || blob_for(key)&.content_type
+      _content_type = content_type || ActiveStorage::Blob.find_by(key: key)&.content_type
       if _content_type.present?
         filename = "#{key}.#{_content_type.split("/").last}"
       else
